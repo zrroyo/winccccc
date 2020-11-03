@@ -1,179 +1,67 @@
 # -*- coding:utf-8 -*-
 
-import ctp.posmgr as posmgr
-
 import tqsdk
-import logging
-import abc
-import time
+from lib import GenConfig
+from .strategy import Strategy
+from .error import TraderError
 
 
-class TraderBadParamError(Exception):
-    pass
-
-
-class Trader():
-    def __init__(self, instrument, user_info, trade_param, log_file, log_level=logging.DEBUG):
-        # 初始化日志接口
-        logger = logging.getLogger(instrument)
-        logger.setLevel(log_level)
-        fh = logging.FileHandler(log_file)
-        fh.setFormatter(logging.Formatter('%(asctime)s:%(filename)s:%(funcName)s:%(lineno)d: <%(levelname)s> %(message)s'))
-        logger.addHandler(fh)
+class TradeTask:
+    """交易"""
+    def __init__(self, instrument, api, stra_name, stra_params, logger):
+        """
+        :param instrument: 合约名称
+        :param api: API接口实例
+        :param stra_name: 策略名称（类名）
+        :param stra_params: 策略参数
+        :param logger: 日志记录接口
+        :raise TraderError
+        """
         self.logger = logger
 
+        if not isinstance(api, tqsdk.TqApi):
+            raise TraderError("必须为tq交易接口类型！")
+        self.api = api
+
+        if instrument not in self.api._data.get("quotes", {}):
+            raise TraderError(f"发现不存在的合约: {instrument} !")
         self.instrument = instrument
-        self.user_info = user_info
-        self.api = tqsdk.TqApi(tqsdk.TqAccount(user_info.broker_id, user_info.account_id, user_info.password))
-        self.tpt = tqsdk.TargetPosTask(self.api, self.instrument)
-        self.maxAddPos, self.param = self.parseCtrlParam(trade_param)
-        self.posmgr = posmgr.PositionManager(self.maxAddPos, self.logger)
-        #
-        self.trend = None
+        self._quote = self.api.get_quote(self.instrument)
 
-    def parseCtrlParam(self, param):
+        _strategy_class = getattr(globals()['strategy'], stra_name)
+        if not issubclass(_strategy_class, Strategy):
+            raise TraderError(f"未找到对应的行政策略: {stra_name} !")
+        self.strategy = _strategy_class(stra_params)
+
+    async def _run(self):
+        """策略协程的执行入口"""
+        with self.api.register_update_notify(self.strategy.active_listener) as update_chan:
+            # async for _ in update_chan:
+            while True:
+                await update_chan.recv_latest()
+                order_offset, order_dir, order_volume = self.strategy.target_pos_change()
+                if order_volume == 0:
+                    continue
+
+                trade_chan = tqsdk.TqChan()
+                order_task = tqsdk.InsertOrderUntilAllTradedTask(self.api, self.instrument, order_dir,
+                                        offset=order_offset, volume=order_volume, trade_chan=trade_chan)
+                await order_task._task
+
+
+class TraderConfig(GenConfig):
+    """从文件中读取交易任务配置"""
+    def __init__(self, cfgFile, task_id):
         """
-
-        :return:
+        :param cfgFile: 配置文件名
+        :param task_id: 合约id
         """
-        raise TraderBadParamError("customized parameters haven't been parsed.")
+        super(TraderConfig, self).__init__(cfgFile)
+        self.cfgFile = cfgFile
+        self.defaultSec = task_id
 
-    def reqTrade(self, instrument):
-        quote = self.api.get_quote(instrument)
-        while True:
-            self.api.wait_update()
-            # 最新价格发生变化
-            if self.api.is_changing(quote, "last_price"):
-                self.onRspTrade(quote.last_price)
+    def get_strategy(self):
+        return self.getSecOption(self.defaultSec, 'strategy')
 
-    def onRspTrade(self, price):
-        """
-
-        :param price:
-        :return:
-        """
-        if self.reqOpenTrend(price):
-            self.onRspOpenTrend(price)
-        elif self.reqAddPosition(price):
-            self.onRspAddPosition(price)
-        elif self.reqCutPosition(price):
-            self.onRspCutPosition(price)
-
-    def reqOpenTrend(self, price):
-        """
-
-        :param price:
-        :return:
-        """
-        ret = False
-        if self.posmgr.numPositions():
-            return ret
-
-        direction, offset, volume = self.signalTriggerTrend(price)
-        if not volume:
-            return ret
-
-        order = self.insertOrder(direction, offset, volume)
-        if not order:
-            self.logger.error("开仓失败: '%s', '%s', '%s'." % (direction, offset, volume))
-            return ret
-
-        _ret = self.posmgr.pushPosition(time.time(), order.trade_price, direction, order.trade_records.get('price'))
-        if not _ret:
-            self.logger.warn("远程开仓成功但本地入仓失败！")
-            return ret
-
-        ret = True
-        self.trend = direction
-        self.onRspOpenTrend(price)
-        return ret
-
-    def reqAddPosition(self, price):
-        """
-
-        :param price:
-        :return:
-        """
-        ret = False
-        if self.posmgr.numPositions() >= self.maxAddPos:
-            return ret
-
-        direction, offset, volume = self.signalAddPos(price)
-        if not volume:
-            return ret
-
-        order = self.insertOrder(direction, offset, volume)
-        if not order:
-            self.logger.error("开仓失败: '%s', '%s', '%s'." % (direction, offset, volume))
-            return ret
-
-        _ret = self.posmgr.pushPosition(time.time(), order.trade_price, direction, order.trade_records.get('price'))
-        if not _ret:
-            self.logger.warn("远程开仓成功但本地入仓失败！")
-            return ret
-
-        ret = True
-        self.logger.log("加仓成功：'%s', '%s', '%s'." % (direction, offset, volume))
-        return ret
-
-    def reqCutPosition(self, price):
-        """
-
-        :param price:
-        :return:
-        """
-        ret = False
-        if self.posmgr.numPositions() <= 0:
-            return ret
-
-        direction, offset, volume, posIdx = self.signalCutPos(price)
-        if not volume:
-            return ret
-
-        order = self.insertOrder(direction, offset, volume)
-        if not order:
-            self.logger.error("平仓失败: '%s', '%s', '%s'." % (direction, offset, volume))
-            return ret
-
-        _ret = self.posmgr.popPosition(posIdx)
-        if not _ret:
-            self.logger.warn("远程平仓成功但本地平仓失败！")
-            return ret
-
-        ret = True
-        self.logger.log("平仓成功：'%s', '%s', '%s'." % (direction, offset, volume))
-        return ret
-
-    def onRspOpenTrend(self, price):
-        pass
-
-    def onRspAddPosition(self, price):
-        pass
-
-    def onRspCutPosition(self, price):
-        pass
-
-    def insertOrder(self, direction, offset, volume):
-        """
-
-        :param direction:
-        :param offset:
-        :param volume:
-        :return: True|False
-        """
-        order = self.api.insert_order(self.instrument, direction, offset, volume)
-        while True:
-            self.api.wait_update()
-            if self.api.is_changing(order, ["status", "volume_orign", "volume_left"]):
-                # Fix me
-                pass
-        return order
-
-    def signalTriggerTrend(self, price):
-        pass
-
-    def signalAddPos(self, price):
-        pass
-
-    def signalCutPos(self, price):
-        pass
+    def get_params(self):
+        return self.getSecOption(self.defaultSec, 'parameter')
