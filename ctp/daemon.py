@@ -28,26 +28,37 @@ class CtpSrvDaemon:
     def __exit__(self, exc_type, exc_val, exc_tb):  # Add __enter__、__exit__??
         pass
 
-    def get_peroids(self, peroid_tag):
+    def get_peroids(self, peroid_tag, cur_time=None):
         """从配置中读取对应当天的时间区间
         :param string peroid_tag: 时间区间标识
+        :param datetime cur_time: datetime时间
         :return list ret: 时间区间
         """
+        ret = []
+        _time = None
         if peroid_tag == 'trade':
             _time = self.global_cfg.get_trade_time()
         elif peroid_tag == 'replay':
             _time = self.global_cfg.get_replay_time()
+        if _time is None:
+            return ret
 
-        ret = []
+        if cur_time is None:
+            cur_time = datetime.now()
+
         for tm in _time.split(','):
             _start, _end = tm.strip().split('~')
             _start = datetime.strptime(_start, "%H:%M")
             _end = datetime.strptime(_end, "%H:%M")
-            _now = datetime.now()
-            _start = _start.replace(year=_now.year, month=_now.month, day=_now.day)
-            _end = _end.replace(year=_now.year, month=_now.month, day=_now.day)
+            _start = _start.replace(year=cur_time.year, month=cur_time.month, day=cur_time.day)
+            _end = _end.replace(year=cur_time.year, month=cur_time.month, day=cur_time.day)
+            # 夜盘交易时间段跨天
             if _start > _end:
                 _end += timedelta(days=1)
+            # cur_time为凌晨12点后的夜盘交易时间
+            if _start - timedelta(days=1) <= cur_time <= _end - timedelta(days=1):
+                _start -= timedelta(days=1)
+                _end -= timedelta(days=1)
             ret.append({'start': _start, 'end': _end})
         return ret
 
@@ -56,12 +67,12 @@ class CtpSrvDaemon:
         :param string peroid_tag: 时间区间标识
         :return tuple ret: (开始时间，结束时间)
         """
-        periods = self.get_peroids(peroid_tag)
-        now = datetime.now()
+        cur_time = datetime.now()
+        periods = self.get_peroids(peroid_tag, cur_time)
         ret = None, None
 
         for p in periods:
-            if p['start'] <= now <= p['end']:
+            if p['start'] <= cur_time <= p['end']:
                 ret = p['start'], p['end']
                 break
         return ret
