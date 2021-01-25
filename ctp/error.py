@@ -12,5 +12,10 @@ class ConfigError(Exception):
 
 
 class StrategyError(Exception):
-    """策略相关异常"""
+    """策略异常"""
+    pass
+
+
+class TradeDetailsRecordError(Exception):
+    """TDR异常"""
     pass
