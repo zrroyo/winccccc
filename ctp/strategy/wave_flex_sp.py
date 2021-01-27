@@ -56,56 +56,56 @@ class STR_WaveFlexSP(Strategy):
         price = self._listener.last_price
         ret = 0
 
-        direction = self.signal_start_trading(tick, price)
+        direction = self._signal_start_trading(tick, price)
         if direction:
             self.logger.info("触发进场信号")
             self.tdr.save_direction(direction)
             self.logger.info("更新TDR持仓数据")
-            self.tdr.add_position()  # FIX ME
+            self.tdr.add_position(Position(price, tick, self.attrs.lot_size_pos, direction))
             ret = self.attrs.lot_size_pos
             return ret
 
         direction = self.tdr.get_direction()
-        if self.signal_end_trading(tick, price, direction):
+        if self._signal_end_trading(tick, price, direction):
             self.logger.info("触发交易退出信号，结束交易")
             self.tdr.save_direction(Strategy.SIG_TRADE_NONE)
             self.logger.info("清除TDR持仓数据")
-            for pos_idx in range(1, self.tdr.get_cur_pos_num()+1):
+            for pos_idx in reversed(range(1, self.tdr.get_cur_pos_num()+1)):
                 self.tdr.del_position(pos_idx)
             ret = self.tdr.get_cur_pos_num() * self.attrs.lot_size_pos
             return -ret
 
-        _ret = self.signal_cut_loss(tick, price, direction)
+        _ret = self._signal_cut_loss(tick, price, direction)
         if _ret is not None:
             self.logger.info("准备止损，清除TDR持仓数据")
-            for pos_idx in range(_ret, self.tdr.get_cur_pos_num() + 1):
+            for pos_idx in reversed(range(_ret, self.tdr.get_cur_pos_num() + 1)):
                 self.tdr.del_position(pos_idx)
             ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs.lot_size_pos
             return -ret
 
-        if self.signal_add_position(tick, price, direction):
+        if self._signal_add_position(tick, price, direction):
             self.logger.info("准备加仓，更新TDR持仓数据")
-            self.tdr.add_position()  # FIX ME
+            self.tdr.add_position(Position(price, tick, self.attrs.lot_size_pos, direction))
             ret = self.attrs.lot_size_pos
             return ret
 
-        _ret = self.signal_stop_profit(tick, price, direction)
+        _ret = self._signal_stop_profit(tick, price, direction)
         if _ret is not None:
             self.logger.info("准备止赢，更新TDR持仓数据")
-            for pos_idx in range(_ret, self.tdr.get_cur_pos_num() + 1):
+            for pos_idx in reversed(range(_ret, self.tdr.get_cur_pos_num() + 1)):
                 self.tdr.del_position(pos_idx)
             ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs.lot_size_pos
             return -ret
 
         return ret
 
-    def signal_start_trading(self, tick, price):
+    def _signal_start_trading(self, tick, price):
         """触发开始交易信号
         :param tick: 交易时间
         :param price: 当前价格
-        :return: SIG_TRADE_SHORT、SIG_TRADE_LONG、None
+        :return: SIG_TRADE_SHORT、SIG_TRADE_LONG、SIG_TRADE_NONE
         """
-        ret = None
+        ret = Strategy.SIG_TRADE_NONE
         days = 15
         lowest = self.tdc.get_lowest_by_ticks(tick, days, TDC.F_CLOSE)
         if price < lowest:
@@ -123,7 +123,7 @@ class STR_WaveFlexSP(Strategy):
 
         return ret
 
-    def signal_end_trading(self, tick, price, direction):
+    def _signal_end_trading(self, tick, price, direction):
         """触发结束交易信号
         :param tick: 交易时间
         :param price: 当前价格
@@ -148,7 +148,7 @@ class STR_WaveFlexSP(Strategy):
 
         return ret
 
-    def signal_add_position(self,  tick, price, direction):
+    def _signal_add_position(self,  tick, price, direction):
         """触发加仓信号
         :param tick: 交易时间
         :param price: 当前价格
@@ -201,7 +201,7 @@ class STR_WaveFlexSP(Strategy):
 
         return ret
 
-    def signal_cut_loss(self, tick, price, direction):
+    def _signal_cut_loss(self, tick, price, direction):
         """触发止损信号
         :param tick: 交易时间
         :param price: 当前价格
@@ -255,7 +255,7 @@ class STR_WaveFlexSP(Strategy):
             ret = True
         return ret
 
-    def signal_stop_profit(self, tick, price, direction):
+    def _signal_stop_profit(self, tick, price, direction):
         """触发止赢信号
         :param tick: 交易时间
         :param price: 当前价格
@@ -281,6 +281,7 @@ class STR_WaveFlexSP(Strategy):
                 if not _skipSP and self.__could_stop_profit(price, pos, espType, thrSP, direction):
                     toSP = posIdx
                     self.pLastCut = (pos.price, self.LAST_CUT_TYPE_SP)
+                    self.tdr.save_property('p_last_cut', self.pLastCut)
                 else:
                     # 不允许隔仓SP，否则仓位统计会发生混乱
                     _skipSP = True
