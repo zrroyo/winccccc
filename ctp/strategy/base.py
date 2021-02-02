@@ -147,18 +147,3 @@ class StrategyConfig(GenConfig):
 
     def get_strategy(self):
         return self.getSecOption(self.defaultSec, 'strategy')
-
-
-class Position:
-    """持仓单位（仓位）"""
-    def __init__ (self, price, time, volume, direction):
-        """加仓信息
-        :param price: 成交价
-        :param time: 时间
-        :param volume: 开仓手数
-        :param direction: 方向
-        """
-        self.price = price
-        self.time = time
-        self.volume = volume
-        self.direction = direction

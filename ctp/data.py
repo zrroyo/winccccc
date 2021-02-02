@@ -142,6 +142,40 @@ class TradeDataComposition:
         return dat[field].max()
 
 
+class Position:
+    """持仓单位（仓位）"""
+    def __init__ (self, price=None, time=None, volume=None, direction=None):
+        """加仓信息
+        :param price: 成交价
+        :param time: 时间
+        :param volume: 开仓手数
+        :param direction: 方向
+        """
+        self.price = price
+        self.time = time
+        self.volume = volume
+        self.direction = direction
+
+    def __str__(self):
+        values = {'price': self.price, 'time': self.time,
+                  'volume': self.volume, 'direction': self.direction}
+        return str(values)
+
+    def assign(self, value_str):
+        """赋值
+        :return True|False
+        """
+        values = eval(value_str)
+        try:
+            self.price = values['price']
+            self.time = values['time']
+            self.volume = values['volume']
+            self.direction = values['direction']
+            return True
+        except KeyError:
+            return False
+
+
 class TradeDetailsRecord(GenConfig):
     def __init__(self, cfgFile, logger):
         """交易策略配置信息接口
@@ -165,9 +199,21 @@ class TradeDetailsRecord(GenConfig):
         :return: True|False
         """
         ret = True
+        self.__positions.clear()
         pos_details = self.getSecOption(self.defaultSec, 'pos_details')
+        if not pos_details:
+            # 仓位为空
+            return ret
+
         try:
-            self.__positions = eval(pos_details)
+            pos_details = eval(pos_details)
+            for val in pos_details:
+                pos = Position()
+                if not pos.assign(val):
+                    self.logger.error(f"无法解析仓位信息 val: {val}")
+                    ret = False
+                    break
+                self.__positions.append(pos)
         except Exception as e:
             self.logger.error(f"转换时出现错误：pos_details: {pos_details}; "
                               f"exp: {traceback.format_exc(e)}")
@@ -176,7 +222,8 @@ class TradeDetailsRecord(GenConfig):
 
     def save_pos_details(self):
         """保存仓位信息"""
-        self.setSecOption(self.defaultSec, 'pos_details', str(self.__positions))
+        pos_details = [str(pos) for pos in self.__positions]
+        self.setSecOption(self.defaultSec, 'pos_details', str(pos_details))
 
     def get_cur_pos_num(self):
         """返回当前仓位"""
