@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta
 from tqsdk import TqApi, TqKq, TqAuth
 from lib import GenConfig
-from .trader import TradeTask, TraderConfig
+from .trader import TradeTask
 
 
 CTP_CONFIG_DIR = os.path.join(os.environ.get('HOME'), '.winctp')
@@ -92,8 +92,7 @@ class CtpSrvDaemon:
         """从配置文件中读取并创建交易任务"""
         cfg = GenConfig(TASKS_CONFIG)
         for task_id in cfg.sectionList():
-            t_cfg = TraderConfig(TASKS_CONFIG, task_id)
-            _task = TradeTask(task_id, self._api, t_cfg.get_strategy(), t_cfg.get_params(), self.logger)
+            _task = TradeTask(task_id, self._api, self.logger)
             self._tasks[task_id] = _task
             self._api.create_task(_task._run())
 

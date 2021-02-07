@@ -1,9 +1,9 @@
 # -*- coding:utf-8 -*-
 
-import json
-from .base import Strategy, Position
+import traceback
+from .base import Strategy
 from ..error import StrategyError
-from ..data import TradeDataComposition as TDC
+from ..data import TradeDataComposition as TDC, Position
 
 
 class STR_WaveFlexSP(Strategy):
@@ -11,19 +11,9 @@ class STR_WaveFlexSP(Strategy):
     LAST_CUT_TYPE_CL = 1
     LAST_CUT_TYPE_SP = 2
 
-    def __init__(self, api, symbol, params, logger):
-        super(STR_WaveFlexSP, self).__init__(api, symbol, params, logger)
-        # 止赢参数。第一仓不支持止赢，其它不能为None
-        self.spThresholds = (
-            (None, None, None, None, None),
-            (3, -0.003, -0.00803, 0.0180, 0.0361),
-            (2, -0.007, -1, 0.04, 0.06),
-            (2, 0, -1, 0.04, 0.08),
-        )
-        #
-        self.apThresholds = [None, 0.013, 0.0129, 0.013]
-        #
-        self.clThresholds = [-0.016, -0.016, -0.025, -0.03]
+    def __init__(self, api, symbol, tsk_cfg, logger):
+        super(STR_WaveFlexSP, self).__init__(api, symbol, tsk_cfg, logger)
+
         #
         self.posStopProfit = self.tdr.get_property('pos_stop_profit', [])
         if self.posStopProfit is None:
@@ -35,13 +25,21 @@ class STR_WaveFlexSP(Strategy):
         # 申明交易跟踪变量
         self._listener = self.api.get_quote(symbol)
 
-    def parse_parameters(self, params):
-        """解析交易参数
-        :param params:
-        :return:
-        """
-        _attrs = json.loads(params)
-        return _attrs
+    def load_tsk_parameters(self):
+        """解析交易参数"""
+        attrs = dict()
+        try:
+            attrs['lot_size_pos'] = eval(self.tsk_cfg.get_param('lot_size_pos'))
+            attrs['signal_start'] = eval(self.tsk_cfg.get_param('signal_start'))
+            attrs['signal_end'] = eval(self.tsk_cfg.get_param('signal_end'))
+            # 止赢参数。第一仓不支持止赢，其它不能为None
+            attrs['spThresholds'] = eval(self.tsk_cfg.get_param('spThresholds'))
+            attrs['apThresholds'] = eval(self.tsk_cfg.get_param('apThresholds'))
+            attrs['clThresholds'] = eval(self.tsk_cfg.get_param('clThresholds'))
+            return attrs
+        except Exception as e:
+            self.logger.error(f"加载任务参数时出错：{traceback.format_exc(e)}")
+            return None
 
     def target_pos_change(self):
         """计算仓位的变化量
@@ -61,8 +59,8 @@ class STR_WaveFlexSP(Strategy):
             self.logger.info("触发进场信号")
             self.tdr.save_direction(direction)
             self.logger.info("更新TDR持仓数据")
-            self.tdr.add_position(Position(price, tick, self.attrs.lot_size_pos, direction))
-            ret = self.attrs.lot_size_pos
+            self.tdr.add_position(Position(price, tick, self.attrs['lot_size_pos'], direction))
+            ret = self.attrs['lot_size_pos']
             return ret
 
         direction = self.tdr.get_direction()
@@ -72,7 +70,7 @@ class STR_WaveFlexSP(Strategy):
             self.logger.info("清除TDR持仓数据")
             for pos_idx in reversed(range(1, self.tdr.get_cur_pos_num()+1)):
                 self.tdr.del_position(pos_idx)
-            ret = self.tdr.get_cur_pos_num() * self.attrs.lot_size_pos
+            ret = self.tdr.get_cur_pos_num() * self.attrs['lot_size_pos']
             return -ret
 
         _ret = self._signal_cut_loss(tick, price, direction)
@@ -80,13 +78,13 @@ class STR_WaveFlexSP(Strategy):
             self.logger.info("准备止损，清除TDR持仓数据")
             for pos_idx in reversed(range(_ret, self.tdr.get_cur_pos_num() + 1)):
                 self.tdr.del_position(pos_idx)
-            ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs.lot_size_pos
+            ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
             return -ret
 
         if self._signal_add_position(tick, price, direction):
             self.logger.info("准备加仓，更新TDR持仓数据")
-            self.tdr.add_position(Position(price, tick, self.attrs.lot_size_pos, direction))
-            ret = self.attrs.lot_size_pos
+            self.tdr.add_position(Position(price, tick, self.attrs['lot_size_pos'], direction))
+            ret = self.attrs['lot_size_pos']
             return ret
 
         _ret = self._signal_stop_profit(tick, price, direction)
@@ -94,7 +92,7 @@ class STR_WaveFlexSP(Strategy):
             self.logger.info("准备止赢，更新TDR持仓数据")
             for pos_idx in reversed(range(_ret, self.tdr.get_cur_pos_num() + 1)):
                 self.tdr.del_position(pos_idx)
-            ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs.lot_size_pos
+            ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
             return -ret
 
         return ret
@@ -106,7 +104,7 @@ class STR_WaveFlexSP(Strategy):
         :return: SIG_TRADE_SHORT、SIG_TRADE_LONG、SIG_TRADE_NONE
         """
         ret = Strategy.SIG_TRADE_NONE
-        days = 15
+        days = self.attrs['signal_start']
         lowest = self.tdc.get_lowest_by_ticks(tick, days, TDC.F_CLOSE)
         if price < lowest:
             self.logger.info(f"{tick} Hit Short Signal: Close {price}, Lowest {lowest}, "
@@ -130,7 +128,7 @@ class STR_WaveFlexSP(Strategy):
         :param direction: 多空方向
         """
         ret = False
-        days = 10
+        days = self.attrs['signal_end']
 
         highest = self.tdc.get_highest_by_ticks(tick, days, TDC.F_CLOSE)
         if direction == Strategy.SIG_TRADE_SHORT and price > highest:
@@ -176,7 +174,7 @@ class STR_WaveFlexSP(Strategy):
 
             elif cutType == self.LAST_CUT_TYPE_SP:
                 cfr = self.gen_cfr(price, plc, direction)
-                _thr = self.spThresholds[self.tdr.get_cur_pos_num()][4]
+                _thr = self.attrs['spThresholds'][self.tdr.get_cur_pos_num()][4]
                 _ignore = cfr <= _thr
                 if not _ignore:
                     self.logger.info(f"[{self.get_signal_direction(direction)}] last SP, cfr {cfr}, _thr {_thr}")
@@ -185,7 +183,7 @@ class STR_WaveFlexSP(Strategy):
                 return ret
 
         try:
-            _thr = self.apThresholds[self.tdr.get_cur_pos_num()]
+            _thr = self.attrs['apThresholds'][self.tdr.get_cur_pos_num()]
             cfr = self.gen_cfr(price, pos.price, direction)
             # 利润浮动需大于仓位对应阈值，并且需大于该仓位上一次开仓价（否则会导致止损失效）
             if cfr >= _thr:
@@ -217,7 +215,7 @@ class STR_WaveFlexSP(Strategy):
         for posIdx in posList:
             pos = self.tdr.get_position(posIdx)
             _cfr = self.gen_cfr(price, pos.price, direction)
-            _thr = self.clThresholds[posIdx - 1]
+            _thr = self.attrs['clThresholds'][posIdx - 1]
             cfr.append(_cfr)
             if _cfr >= _thr:
                 # 如果不满足则之前仓位也不会满足
@@ -227,6 +225,8 @@ class STR_WaveFlexSP(Strategy):
             # 记录止损点，作为加仓条件以避免止损无效
             self.pLastCut = (pos.price, self.LAST_CUT_TYPE_CL)
             self.tdr.save_property('p_last_cut', self.pLastCut)
+            # Fix ME
+            # To move pos from self.posStopProfit
 
         ret = None
         if toCut:
@@ -263,10 +263,6 @@ class STR_WaveFlexSP(Strategy):
         :return: 未触发止损信号返回None，否则返回自定义参数
         """
         ret = None
-
-        if not self.dayLastTick or self.dayLastTick.date() != tick.date():
-            self.dayLastTick = self.tickHelper.dayLastTick(tick)
-
         toSP = None
         _skipSP = False
 
@@ -275,7 +271,7 @@ class STR_WaveFlexSP(Strategy):
         posList.reverse()
         for posIdx in posList:
             pos = self.tdr.get_position(posIdx)
-            (thrDL, thrESP1, thrESP2, thrSP) = self.spThresholds[posIdx - 1][0:4]
+            (thrDL, thrESP1, thrESP2, thrSP) = self.attrs['spThresholds'][posIdx - 1][0:4]
             try:
                 espType = self.posStopProfit[posIdx][2]
                 if not _skipSP and self.__could_stop_profit(price, pos, espType, thrSP, direction):
@@ -286,37 +282,8 @@ class STR_WaveFlexSP(Strategy):
                     # 不允许隔仓SP，否则仓位统计会发生混乱
                     _skipSP = True
             except KeyError:
-                # 该仓没有ESP，以下仓位由于隔仓不允许SP
-                _skipSP = True
-                if tick != self.dayLastTick:
-                    # 仅在交易日的最后一个tick检查是否触发ESP
-                    break
-
-                if toSP:
-                    # 高仓位已经触发止赢，价格必然高于低仓位，ESP条件不可能成立
-                    break
-
-                if not thrDL:
-                    # 为了避免仓位混乱，除第一个仓位外都必须设置SP相关参数，否则引起仓位混乱
-                    break
-
-                espType = 1
-                _fr = self.gen_cfr(price, pos.price, direction)
-                if _fr > thrESP1:
-                    # 低仓位ESP条件仍有可能满足
-                    continue
-                elif _fr < thrESP2:
-                    espType = 2
-
-                _dayLasts = self.tickHelper.dayLasts(pos.time, tick)
-                if _dayLasts < thrDL:
-                    #
-                    continue
-
-                self.logger.info(f"signalStopProfit: pos {posIdx}, cur (tick {tick}, price {price}), "
-                                 f"DL {_dayLasts}, FR {_fr}, esp {espType}")
-                #
-                self.posStopProfit[posIdx] = [True, _fr, espType]
+                # 仓位未进入ESP，勿须止赢
+                break
 
         if toSP:
             ret = toSP
