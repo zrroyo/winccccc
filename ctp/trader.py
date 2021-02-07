@@ -2,13 +2,14 @@
 
 import tqsdk
 from lib import GenConfig
-from .strategy import Strategy
+from .strategy import Strategy  # Fix me
 from .error import TraderError
+from .daemon import TASKS_CONFIG
 
 
 class TradeTask:
     """交易"""
-    def __init__(self, instrument, api, stra_name, stra_params, logger):
+    def __init__(self, instrument, api, logger):
         """
         :param instrument: 合约名称
         :param api: API接口实例
@@ -28,10 +29,15 @@ class TradeTask:
         self.instrument = instrument
         self._quote = self.api.get_quote(self.instrument)
 
-        _strategy_class = getattr(globals()['strategy'], stra_name)
+        self.tsk_cfg = TraderConfig(TASKS_CONFIG, instrument)
+        self.strategy_name = self.tsk_cfg.get_param('strategy')
+        if self.strategy_name is None:
+            raise TraderError(f"未找到合约 {instrument} 的交易策略！")
+
+        _strategy_class = getattr(globals()['strategy'], self.strategy_name)
         if not issubclass(_strategy_class, Strategy):
-            raise TraderError(f"未找到对应的行政策略: {stra_name} !")
-        self.strategy = _strategy_class(stra_params)
+            raise TraderError(f"发现未知的交易策略: {self.strategy_name}！")
+        self.strategy = _strategy_class(self.api, self.instrument, self.tsk_cfg, self.logger)
 
     async def _run(self):
         """策略协程的执行入口"""
@@ -60,8 +66,6 @@ class TraderConfig(GenConfig):
         self.cfgFile = cfgFile
         self.defaultSec = task_id
 
-    def get_strategy(self):
-        return self.getSecOption(self.defaultSec, 'strategy')
-
-    def get_params(self):
-        return self.getSecOption(self.defaultSec, 'parameter')
+    def get_param(self, name):
+        """得到交易参数"""
+        return self.getSecOption(self.defaultSec, name)

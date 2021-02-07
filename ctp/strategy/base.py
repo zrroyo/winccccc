@@ -18,35 +18,35 @@ class Strategy:
     SIG_TRADE_LONG = 1  # 买多
     SIG_TRADE_NONE = 0  # 没有行情
 
-    def __init__(self, api, symbol, params, logger):
+    def __init__(self, api, symbol, tsk_cfg, logger):
         """
-        :param TqApi api:
-        :param string symbol:
-        :param string params: 策略参数字符串，参数间以';'号分隔
-        :param logger:
-        :raise StrategyError: 出错统一抛出StrategyError异常
+        :param TqApi api: API接口实例
+        :param string symbol: 交易所合约代号
+        :param TraderConfig tsk_cfg: 任务参数读取接口
+        :param logger: 日志存取接口
+        :raise: StrategyError异常
         """
         self.api = api
         self.symbol = symbol
-        self.params = params
+        self.tsk_cfg = tsk_cfg
         self.logger = logger
 
         self.tdc_file = self.get_history_data_file()
         if not os.path.exists(self.tdc_file):
-            raise StrategyError(f"未找到 {symbol} 对应的历史数据！")
+            raise StrategyError(f"未找到 {self.symbol} 的TDC数据！")
         self.tdc = TDC(self.tdc_file, self.logger)
 
         self.tdr_file = self.get_trade_details_file()
         if not os.path.exists(self.tdr_file):
-            raise StrategyError(f"未找到 {symbol} 对应的历史数据！")
+            raise StrategyError(f"未找到 {self.symbol} 的TDR数据！")
 
         self.tdr = self.init_tdr()
         if self.tdr is None:
-            raise StrategyError(f"TDR未初始化成功！")
+            raise StrategyError(f"TDR未初始化成功：{self.symbol} ！")
 
-        self.attrs = self.parse_parameters(params)
+        self.attrs = self.load_tsk_parameters()
         if self.attrs is None:
-            raise StrategyError(f"解析策略参数错误 {params}！")
+            raise StrategyError(f"解析 {self.symbol} 策略参数错误！")
 
         # 子策略必须要初始化自己的监听对象
         self._listener = None
@@ -64,10 +64,9 @@ class Strategy:
         return ret
 
     @abstractmethod
-    def parse_parameters(self, params):
+    def load_tsk_parameters(self):
         """解析交易参数
-        :param params:
-        :return:
+        :return dict: 交易任务参数
         """
         pass
 
