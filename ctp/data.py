@@ -144,36 +144,57 @@ class TradeDataComposition:
 
 class Position:
     """持仓单位（仓位）"""
-    def __init__ (self, price=None, time=None, volume=None, direction=None):
+
+    # 仓位状态
+    POS_STAT_OPEN = 1  # 开仓中
+    POS_STAT_CLOSE = 2  # 平仓中
+    POS_STAT_FINISH = 0  # 开平仓已完成
+    POS_STAT_INVALID = -1  # 无效
+
+    def __init__(self, pos=None, price=None, time=None, volume=None, direction=None, status=-1):
         """加仓信息
+        :param pos: 目标持仓数
         :param price: 成交价
         :param time: 时间
         :param volume: 开仓手数
         :param direction: 方向
+        :param status: 状态
         """
+        self.target_pos = pos
         self.price = price
         self.time = time
         self.volume = volume
         self.direction = direction
+        self.status = status
 
     def __str__(self):
-        values = {'price': self.price, 'time': self.time,
-                  'volume': self.volume, 'direction': self.direction}
+        values = {'target_pos': self.target_pos, 'price': self.price, 'time': self.time,
+                  'volume': self.volume, 'direction': self.direction, 'status': self.status}
         return str(values)
 
-    def assign(self, value_str):
+    def assign(self, values):
         """赋值
+        :param dict values: 赋值数据
         :return True|False
         """
-        values = eval(value_str)
         try:
-            self.price = values['price']
-            self.time = values['time']
-            self.volume = values['volume']
-            self.direction = values['direction']
-            return True
-        except KeyError:
+            passed_fields = values.keys()
+        except Exception:
             return False
+
+        if 'target_pos' in passed_fields:
+            self.target_pos = values['target_pos']
+        if 'price' in passed_fields:
+            self.price = values['price']
+        if 'time' in passed_fields:
+            self.time = values['time']
+        if 'volume' in passed_fields:
+            self.volume = values['volume']
+        if 'direction' in passed_fields:
+            self.direction = values['direction']
+        if 'status' in passed_fields:
+            self.status = values['status']
+        return True
 
 
 class TradeDetailsRecord(GenConfig):
@@ -193,6 +214,15 @@ class TradeDetailsRecord(GenConfig):
         self.__direction = self.get_property('current_direction', 0)
         if self.__direction is None:
             raise TradeDetailsRecordError(f"加载current_direction出错！")
+
+    def __valid_pos_index(self, num):
+        """返回是否为有效的仓位索引
+        :param num: 仓位索引
+        :return: True|False
+        """
+        if num < 1 or num > len(self.__positions):
+            return False
+        return True
 
     def load_pos_details(self):
         """加载仓位信息
@@ -234,20 +264,38 @@ class TradeDetailsRecord(GenConfig):
         :param num: 仓位索引，默认最后一个仓位
         :return: 索引对应仓位
         """
-        ret = None
         # 默认（num为None）返回最后一个仓位
         if num is None:
             num = self.get_cur_pos_num()
 
-        if num < 1 or num > len(self.__positions):
+        if not self.__valid_pos_index(num):
             self.logger.error(f"仓位超出范围：num {num}, current {len(self.__positions)}")
-            return ret
+            return None
 
         return self.__positions[num-1]
 
+    def set_position(self, num, values):
+        """
+        更新仓位数据
+        :param num: 仓位索引
+        :param dict values: 赋值数据
+        :return: True|False
+        """
+        if not self.__valid_pos_index(num):
+            self.logger.error(f"仓位超出范围：num {num}, current {len(self.__positions)}")
+            return False
+
+        pos = self.__positions[num-1]
+        if not pos.assign(values):
+            return False
+        self.save_pos_details()
+        return True
+
     def add_position(self, pos):
-        """添加新仓位"""
-        self.__positions += [{'time': pos.time, 'price': pos.price, 'volume': pos.volume}]
+        """添加新仓位
+        :param pos: Position class实例
+        """
+        self.__positions.append(pos)
         self.save_pos_details()
 
     def del_position(self, num):
@@ -260,13 +308,18 @@ class TradeDetailsRecord(GenConfig):
         if num is None:
             num = self.get_cur_pos_num()
 
-        if num < 1 or num > len(self.__positions):
+        if not self.__valid_pos_index(num):
             self.logger.error(f"仓位超出范围：num {num}, current {len(self.__positions)}")
             return ret
 
         ret = self.__positions.pop(num-1)
         self.save_pos_details()
         return ret
+
+    def clear_position(self):
+        """清除所有仓位"""
+        self.__positions.clear()
+        self.save_pos_details()
 
     def get_direction(self):
         """得到交易方向
