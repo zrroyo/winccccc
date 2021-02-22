@@ -3,7 +3,7 @@
 import traceback
 from .base import Strategy
 from ..error import StrategyError
-from ..data import TradeDataComposition as TDC, Position
+from ..data import TradeDataComposition as TDC, Position as POS
 
 
 class STR_WaveFlexSP(Strategy):
@@ -23,7 +23,8 @@ class STR_WaveFlexSP(Strategy):
         if self.pLastCut is None:
             raise StrategyError(f"TDR中pLastCut数据错误！")
         # 申明交易跟踪变量
-        self._listener = self.api.get_quote(symbol)
+        self._listener = self.api.get_kline_serial(self.symbol, 60, data_length=20)
+        self._quote = self.api.get_quote(symbol)
 
     def load_tsk_parameters(self):
         """解析交易参数"""
@@ -41,61 +42,86 @@ class STR_WaveFlexSP(Strategy):
             self.logger.error(f"加载任务参数时出错：{traceback.format_exc(e)}")
             return None
 
-    def target_pos_change(self):
+    async def target_pos_change(self):
         """计算仓位的变化量
         基本于self._listener的变化来计算持仓的变化量
-
-        :returns int: 以手数为单位的仓位变化量
-                    > 0: 增加仓位
-                    < 0: 减少仓位
-                    = 0: 持仓不变
         """
-        tick = self._listener.datetime
-        price = self._listener.last_price
-        ret = 0
+        while True:
+            if not self.api.is_changing(self._listener.iloc[-1], "datetime"):
+                yield None, None
+                continue
 
-        direction = self._signal_start_trading(tick, price)
-        if direction:
-            self.logger.info("触发进场信号")
-            self.tdr.save_direction(direction)
-            self.logger.info("更新TDR持仓数据")
-            self.tdr.add_position(Position(price, tick, self.attrs['lot_size_pos'], direction))
-            ret = self.attrs['lot_size_pos']
-            return ret
+            tick = self._listener.iloc[-1]['datetime']
+            price = self._listener.iloc[-1]['last_price']
+            direction = self.tdr.get_direction()
 
-        direction = self.tdr.get_direction()
-        if self._signal_end_trading(tick, price, direction):
-            self.logger.info("触发交易退出信号，结束交易")
-            self.tdr.save_direction(Strategy.SIG_TRADE_NONE)
-            self.logger.info("清除TDR持仓数据")
-            for pos_idx in reversed(range(1, self.tdr.get_cur_pos_num()+1)):
-                self.tdr.del_position(pos_idx)
-            ret = self.tdr.get_cur_pos_num() * self.attrs['lot_size_pos']
-            return -ret
+            if direction == Strategy.SIG_TRADE_NONE:
+                direction = self._signal_start_trading(tick, price)
+                if direction:
+                    self.logger.info(f"触发进场信号: {tick}, {price}, {direction}")
+                    self.tdr.save_direction(direction)
+                    exp_pos, exp_change = self.calculate_target_pos(direction, self.attrs['lot_size_pos'])
+                    self.tdr.add_position(POS(exp_pos, price, tick, exp_change, direction, POS.POS_STAT_OPEN))
+                    yield exp_pos, exp_change
+                    dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                    self.logger.info(f"进场，更新TDR持仓数据：成交 {dealed_vol}")
+                    self.handle_position_late(dealed_vol)
+                    continue
+                # 新行情未到来
+                yield None, None
+                continue
 
-        _ret = self._signal_cut_loss(tick, price, direction)
-        if _ret is not None:
-            self.logger.info("准备止损，清除TDR持仓数据")
-            for pos_idx in reversed(range(_ret, self.tdr.get_cur_pos_num() + 1)):
-                self.tdr.del_position(pos_idx)
-            ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
-            return -ret
+            # 在行情中 #
 
-        if self._signal_add_position(tick, price, direction):
-            self.logger.info("准备加仓，更新TDR持仓数据")
-            self.tdr.add_position(Position(price, tick, self.attrs['lot_size_pos'], direction))
-            ret = self.attrs['lot_size_pos']
-            return ret
+            if self._signal_end_trading(tick, price, direction):
+                self.logger.info(f"触发退出信号，结束交易：{tick}, {price}, {direction}")
+                exp_pos, exp_change = self.calculate_target_pos(direction, 0)  # 清仓
+                # 设置标志...
+                for num in range(self.tdr.get_cur_pos_num(), 0, -1):
+                    self.tdr.set_position(num, {"target_pos": exp_pos, "status": POS.POS_STAT_CLOSE})
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"退场，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
+                self.tdr.save_direction(Strategy.SIG_TRADE_NONE)
+                continue
 
-        _ret = self._signal_stop_profit(tick, price, direction)
-        if _ret is not None:
-            self.logger.info("准备止赢，更新TDR持仓数据")
-            for pos_idx in reversed(range(_ret, self.tdr.get_cur_pos_num() + 1)):
-                self.tdr.del_position(pos_idx)
-            ret = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
-            return -ret
+            _ret = self._signal_cut_loss(tick, price, direction)
+            if _ret is not None:
+                self.logger.info(f"触发止损信号：{tick}, {price}, {direction}")
+                pos_change = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
+                exp_pos, exp_change = self.calculate_target_pos(direction, -pos_change)  # 减掉(仓位数 * 手数/仓)
+                # 设置标志...
+                for num in range(self.tdr.get_cur_pos_num(), _ret-1, -1):
+                    self.tdr.set_position(num, {"target_pos": exp_pos, "status": POS.POS_STAT_CLOSE})
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"止损，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
+                continue
 
-        return ret
+            if self._signal_add_position(tick, price, direction):
+                self.logger.info(f"触发加仓信号：{tick}, {price}, {direction}")
+                exp_pos, exp_change = self.calculate_target_pos(direction, self.attrs['lot_size_pos'])
+                self.tdr.add_position(POS(exp_pos, price, tick, exp_change, direction, POS.POS_STAT_OPEN))
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"进场，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
+                continue
+
+            _ret = self._signal_stop_profit(tick, price, direction)
+            if _ret is not None:
+                self.logger.info(f"触发止赢信号：{tick}, {price}, {direction}")
+                pos_change = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
+                exp_pos, exp_change = self.calculate_target_pos(direction, -pos_change)  # 减掉(仓位数 * 手数/仓)
+                # 设置标志...
+                for num in range(self.tdr.get_cur_pos_num(), _ret-1, -1):
+                    self.tdr.set_position(num, {"target_pos": exp_pos, "status": POS.POS_STAT_CLOSE})
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"止赢，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
 
     def _signal_start_trading(self, tick, price):
         """触发开始交易信号
@@ -155,7 +181,7 @@ class STR_WaveFlexSP(Strategy):
         ret = False
         try:
             # 当前最高仓位已进入止赢模式，停止加仓（否则止赢模式失效）
-            self.posStopProfit[self.tdr.get_cur_pos_num()]
+            _ = self.posStopProfit[self.tdr.get_cur_pos_num()]
             return ret
         except KeyError:
             pass
@@ -210,8 +236,7 @@ class STR_WaveFlexSP(Strategy):
         cfr = list()
 
         # 从最后一仓开始逆序检查
-        posList = list(range(1, self.tdr.get_cur_pos_num() + 1))
-        posList.reverse()
+        posList = range(self.tdr.get_cur_pos_num(), 0, -1)
         for posIdx in posList:
             pos = self.tdr.get_position(posIdx)
             _cfr = self.gen_cfr(price, pos.price, direction)
@@ -267,8 +292,7 @@ class STR_WaveFlexSP(Strategy):
         _skipSP = False
 
         # 从最后一仓开始逆序检查
-        posList = list(range(1, self.tdr.get_cur_pos_num() + 1))
-        posList.reverse()
+        posList = range(self.tdr.get_cur_pos_num(), 0, -1)
         for posIdx in posList:
             pos = self.tdr.get_position(posIdx)
             (thrDL, thrESP1, thrESP2, thrSP) = self.attrs['spThresholds'][posIdx - 1][0:4]

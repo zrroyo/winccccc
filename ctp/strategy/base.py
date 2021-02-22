@@ -3,11 +3,12 @@
 import os
 import traceback
 import numpy as np
+from tqsdk import TqChan
 from abc import ABCMeta, abstractmethod
 from lib import GenConfig
 from ..globals import GlobalConfig
 from ..error import StrategyError, TradeDetailsRecordError
-from ..data import TradeDataComposition as TDC, TradeDetailsRecord as TDR
+from ..data import TradeDataComposition as TDC, TradeDetailsRecord as TDR, Position as POS
 
 
 class Strategy:
@@ -51,9 +52,13 @@ class Strategy:
         # 子策略必须要初始化自己的监听对象
         self._listener = None
 
+        self._position = self.api.get_position(symbol)
+        self._pos_chg_chan = TqChan(self.api)  # 接收仓位变化通知
+        self.unhandled_pos = self.__check_unhandled_positions()   # 交易所有未处理的订单
+
     def init_tdr(self):
-        """初始化tdr ---
-        策略类可以重载该方法并返回自定义的TDR对象
+        """初始化tdr
+        ---> 策略类可以重载该方法并返回自定义的TDR对象
         :return: 正常返回TDR或其子类，失败则返回None
         """
         try:
@@ -78,7 +83,7 @@ class Strategy:
         return self._listener
 
     @abstractmethod
-    def target_pos_change(self):
+    async def target_pos_change(self):
         """计算仓位的变化量
         基本于self._listener的变化来计算持仓的变化量
 
@@ -88,6 +93,75 @@ class Strategy:
                     = 0: 持仓不变
         """
         pass
+
+    def calculate_target_pos(self, direction, pos_change):
+        """计算调整的目标仓位
+        :param direction: 持仓方向
+        :param pos_change: >0 加仓，<0 减仓，==0 清仓
+        :return: tuple，(目标持仓，调整仓数)
+        """
+        target_pos = 0
+        for i in range(1, self.tdr.get_cur_pos_num() + 1):
+            _pos = self.tdr.get_position(i)
+            target_pos += _pos.volume
+        target_pos += pos_change
+
+        if pos_change == 0:
+            pos_change = target_pos
+            target_pos = 0
+
+        if direction == Strategy.SIG_TRADE_LONG:
+            return target_pos, abs(pos_change)
+        elif direction == Strategy.SIG_TRADE_SHORT:
+            return target_pos * -1, abs(pos_change)
+        else:
+            return None, None
+
+    def notify_pos_change(self, value):
+        """仓位发生变化时，给策略实例发送通知"""
+        self._pos_chg_chan.send_nowait(value)
+
+    def __check_unhandled_positions(self):
+        """检查交易服务器中是否有未完成交易单
+        :return: 没有返回 None，有则返回目标仓位数
+        """
+        exp_pos = None
+        for num in range(self.tdr.get_cur_pos_num(), 0, -1):
+            pos = self.tdr.get_position(num)
+            if pos.status == POS.POS_STAT_FINISH:
+                break
+            elif pos.status == POS.POS_STAT_OPEN:
+                exp_pos = pos.target_pos
+                break
+            elif pos.status == POS.POS_STAT_CLOSE:
+                exp_pos = pos.target_pos
+
+        if exp_pos is None:
+            return None
+
+        self.logger.info(f"发现有仓位未完成！")
+        # 还有交易未执行完
+        if len(self._position.orders) > 0:
+            self.logger.info(f"发现有未完成的交易单！")
+            pass  # cancel orders. FIX ME!!
+
+        delta_change = abs(self._position.pos - exp_pos)
+        return exp_pos, delta_change
+
+    def handle_position_late(self, dealed_vol):
+        """交易完成后更新本地仓位数据
+        :param dealed_vol: 实际成交手数
+        """
+        for num in range(self.tdr.get_cur_pos_num(), 0, -1):
+            pos = self.tdr.get_position(num)
+            if pos.status == POS.POS_STAT_FINISH:
+                break
+            elif pos.status == POS.POS_STAT_OPEN:
+                self.tdr.set_position(self.tdr.get_cur_pos_num(),
+                                      {'volume': dealed_vol, "status": POS.POS_STAT_FINISH})
+                break
+            elif pos.status == POS.POS_STAT_CLOSE:
+                self.tdr.del_position(num)
 
     def get_history_data_file(self):
         """得到历史数据文件"""
