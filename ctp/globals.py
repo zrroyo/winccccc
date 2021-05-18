@@ -24,3 +24,7 @@ class GlobalConfig(GenConfig):
 
     def get_trader_config_dir(self):
         return self.getSecOption(self.defaultSec, 'trader_config_dir')
+
+    def get_market_data_dir(self):
+        return self.getSecOption(self.defaultSec, 'market_data_dir')
+
