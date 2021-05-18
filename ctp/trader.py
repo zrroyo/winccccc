@@ -76,11 +76,11 @@ class TradeTask:
     async def _run(self):
         """策略协程的执行入口"""
         # 如果服务器中有未完成的交易单，需先处理完成
-        if self.strategy.unhandled_pos is not None:
-            exp_pos, delta_change = self.strategy.unhandled_pos
+        if self.strategy.unfinished_pos is not None:
+            exp_pos, delta_change = self.strategy.unfinished_pos
             await self.req_update_target_pos(exp_pos, delta_change, notify=False)
             self.strategy.handle_position_late(delta_change)
-            self.strategy.unhandled_pos = None
+            self.strategy.unfinished_pos = None
 
         async with self.api.register_update_notify(self.strategy.active_listener) as update_chan:
             async for _ in update_chan:
