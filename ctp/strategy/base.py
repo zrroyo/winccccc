@@ -84,19 +84,134 @@ class Strategy:
             raise StrategyError("策略未初始化 ‘_listener’ 属性")
         return self._listener
 
-    @abstractmethod
     async def target_pos_change(self):
         """计算仓位的变化量
         基本于self._listener的变化来计算持仓的变化量
+        """
+        while True:
+            if not self.api.is_changing(self._listener.iloc[-1], "datetime"):
+                yield None, None
+                continue
 
-        :returns int: 以手数为单位的仓位变化量
-                    > 0: 增加仓位
-                    < 0: 减少仓位
-                    = 0: 持仓不变
+            tick = self._listener.iloc[-1]['datetime']
+            price = self._listener.iloc[-1]['last_price']
+            direction = self.tdr.get_direction()
+
+            if direction == Strategy.SIG_TRADE_NONE:
+                direction = self._signal_start_trading(tick, price)
+                if direction:
+                    self.logger.info(f"触发进场信号: {tick}, {price}, {direction}")
+                    self.tdr.save_direction(direction)
+                    exp_pos, exp_change = self._calculate_target_pos(direction, self.attrs['lot_size_pos'])
+                    self.tdr.add_position(POS(exp_pos, price, tick, exp_change, direction, POS.POS_STAT_OPEN))
+                    yield exp_pos, exp_change
+                    dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                    self.logger.info(f"进场，更新TDR持仓数据：成交 {dealed_vol}")
+                    self.handle_position_late(dealed_vol)
+                    continue
+                # 新行情未到来
+                yield None, None
+                continue
+
+            # 在行情中 #
+
+            if self._signal_end_trading(tick, price, direction):
+                self.logger.info(f"触发退出信号，结束交易：{tick}, {price}, {direction}")
+                exp_pos, exp_change = self._calculate_target_pos(direction, 0)  # 清仓
+                # 设置标志...
+                for num in range(self.tdr.get_cur_pos_num(), 0, -1):
+                    self.tdr.set_position(num, {"target_pos": exp_pos, "status": POS.POS_STAT_CLOSE})
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"退场，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
+                self.tdr.save_direction(Strategy.SIG_TRADE_NONE)
+                continue
+
+            _ret = self._signal_cut_loss(tick, price, direction)
+            if _ret is not None:
+                self.logger.info(f"触发止损信号：{tick}, {price}, {direction}")
+                pos_change = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
+                exp_pos, exp_change = self._calculate_target_pos(direction, -pos_change)  # 减掉(仓位数 * 手数/仓)
+                # 设置标志...
+                for num in range(self.tdr.get_cur_pos_num(), _ret-1, -1):
+                    self.tdr.set_position(num, {"target_pos": exp_pos, "status": POS.POS_STAT_CLOSE})
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"止损，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
+                continue
+
+            if self._signal_add_position(tick, price, direction):
+                self.logger.info(f"触发加仓信号：{tick}, {price}, {direction}")
+                exp_pos, exp_change = self._calculate_target_pos(direction, self.attrs['lot_size_pos'])
+                self.tdr.add_position(POS(exp_pos, price, tick, exp_change, direction, POS.POS_STAT_OPEN))
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"进场，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
+                continue
+
+            _ret = self._signal_stop_profit(tick, price, direction)
+            if _ret is not None:
+                self.logger.info(f"触发止赢信号：{tick}, {price}, {direction}")
+                pos_change = (self.tdr.get_cur_pos_num() - _ret + 1) * self.attrs['lot_size_pos']
+                exp_pos, exp_change = self._calculate_target_pos(direction, -pos_change)  # 减掉(仓位数 * 手数/仓)
+                # 设置标志...
+                for num in range(self.tdr.get_cur_pos_num(), _ret-1, -1):
+                    self.tdr.set_position(num, {"target_pos": exp_pos, "status": POS.POS_STAT_CLOSE})
+                yield exp_pos, exp_change
+                dealed_vol = await self._pos_chg_chan.recv_latest()  # 等待成交
+                self.logger.info(f"止赢，更新TDR持仓数据：成交 {dealed_vol}")
+                self.handle_position_late(dealed_vol)
+
+    @abstractmethod
+    def _signal_start_trading(self, tick, price):
+        """触发开始交易信号
+        :param tick: 交易时间
+        :param price: 当前价格
+        :return: SIG_TRADE_SHORT、SIG_TRADE_LONG、SIG_TRADE_NONE
         """
         pass
 
-    def calculate_target_pos(self, direction, pos_change):
+    @abstractmethod
+    def _signal_end_trading(self, tick, price, direction):
+        """触发结束交易信号
+        :param tick: 交易时间
+        :param price: 当前价格
+        :param direction: 多空方向
+        :return True|False
+        """
+        pass
+
+    def _signal_add_position(self,  tick, price, direction):
+        """触发加仓信号
+        :param tick: 交易时间
+        :param price: 当前价格
+        :param direction: 多空方向
+        :return True|False
+        """
+        pass
+
+    def _signal_cut_loss(self, tick, price, direction):
+        """触发止损信号
+        :param tick: 交易时间
+        :param price: 当前价格
+        :param direction: 多空方向
+        :return: 未触发止损信号返回None，否则返回止损的仓位索引
+        """
+        pass
+
+    def _signal_stop_profit(self, tick, price, direction):
+        """触发止赢信号
+        :param tick: 交易时间
+        :param price: 当前价格
+        :param direction: 多空方向
+        :return: 未触发止损信号返回None，否则返回止损的仓位索引
+        """
+        pass
+
+    def _calculate_target_pos(self, direction, pos_change):
         """计算调整的目标仓位
         :param direction: 持仓方向
         :param pos_change: >0 加仓，<0 减仓，==0 清仓
