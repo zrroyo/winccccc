@@ -6,18 +6,24 @@ import sys
 import traceback
 sys.path.append(os.path.dirname(__file__))
 
+_help_info = f"""
+{os.path.basename(sys.argv[0])} : at least one sub-command listed below is required.
+    ctp     --- Start CTP trading.
+    md      --- Receive market data.
+"""
+
 try:
+    ret = 0
     if len(sys.argv) < 2:
-        sys.exit(0)
+        print(_help_info)
+        sys.exit(ret)
 
     _module = '.'.join([sys.argv[1], 'parser'])
     mod = __import__(_module)
-except (ImportError, ModuleNotFoundError) as e:
-    print("未发现指定命令模块： '%s'" % sys.argv[1])
-    sys.exit(1)
-
-try:
     ret = mod.parser.run()
+except (ImportError, ModuleNotFoundError) as e:
+    print(f"未发现指定命令模块： {sys.argv[1]}")
+    ret = 1
 except Exception as e:
     print(traceback.format_exc())
     ret = 1
