@@ -8,7 +8,9 @@ from tqsdk import TqApi, TqAccount, TqSim, TqAuth, TqKq, TargetPosTask, TqChan, 
 
 class TqSdkDemo(object):
     def __init__(self):
-        self.api = TqApi(TqSim(), TqAuth("", ""))   # sdk 2.0.4
+        auth = TqAuth("13286016839", "Good.day$2020")
+        self.api = TqApi(TqAccount("H宏源期货", "901207680", "wawj687913"), auth=auth)
+        # self.api = TqApi(TqSim(), auth=auth)   # sdk 2.0.4
 
     def test_get_md_data(self, instrument):
         quote = self.api.get_quote(instrument)
