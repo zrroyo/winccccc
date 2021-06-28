@@ -7,11 +7,7 @@ from datetime import datetime, timedelta
 from tqsdk import TqApi, TqKq, TqAuth
 from lib import GenConfig
 from .trader import TradeTask
-
-
-CTP_CONFIG_DIR = os.path.join(os.environ.get('HOME'), '.winctp')
-GLOBAL_CONFIG = os.path.join(CTP_CONFIG_DIR, 'global')
-TASKS_CONFIG = os.path.join(CTP_CONFIG_DIR, 'tasks')
+from .globals import GLOBAL_CONFIG, TASKS_CONFIG
 
 
 class CtpSrvDaemon:

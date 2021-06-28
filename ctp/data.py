@@ -2,7 +2,7 @@
 
 import traceback
 import pandas as pd
-from ..lib import GenConfig
+from lib import GenConfig
 from .error import TradeDetailsRecordError
 
 

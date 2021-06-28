@@ -5,7 +5,7 @@ from tqsdk import TqApi, TqChan, TargetPosTask
 from lib import GenConfig
 from .strategy import Strategy  # Fix me
 from .error import TraderError
-from .daemon import TASKS_CONFIG
+from .globals import TASKS_CONFIG
 
 
 class TradeTask:
