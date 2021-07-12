@@ -1,12 +1,10 @@
 # -*- coding:utf-8 -*-
 
 import os
-import asyncio
 import traceback
 import numpy as np
-from tqsdk import TqChan, tafunc
+from tqsdk import TqChan
 from abc import ABCMeta, abstractmethod
-from datetime import datetime
 from lib import GenConfig
 from ..globals import GlobalConfig
 from ..error import StrategyError, TradeDetailsRecordError
@@ -325,12 +323,6 @@ class Strategy:
             self.logger.error(f"输入opPrice异常 {opPrice}")
         return ret
 
-    def enable_save_market_data(self, md_saver):
-        """使能保存行情数据到本地"""
-        if not isinstance(md_saver, MarketDataSaver):
-            raise StrategyError(f"发现未知的行情存储实例！")
-        self.api.create_task(md_saver.save_market_data())
-
 
 class StrategyConfig(GenConfig):
     """交易策略配置信息接口"""
@@ -345,38 +337,3 @@ class StrategyConfig(GenConfig):
 
     def get_strategy(self):
         return self.getSecOption(self.defaultSec, 'strategy')
-
-
-class MarketDataSaver:
-    """存储行情数据至本地"""
-    def __init__(self, api, md_file, md_obj, symbol, logger):
-        self.logger = logger
-        self.api = api
-        self.md_obj = md_obj
-        self.symbol = symbol
-        _global = GlobalConfig()
-        filename = os.path.join(_global.get_market_data_dir(), md_file)
-        self.md_fp = open(filename, 'a+')
-
-    def __exit__(self, exc_type, exc_val, exc_tb):   # FIX ME!!  -->
-        self.md_fp.close()
-
-    async def save_market_data(self):
-        """保存行情数据"""
-        try:
-            async with self.api.register_update_notify(self.md_obj) as update_chan:
-                async for _ in update_chan:
-                    if self.api.is_changing(self.md_obj.iloc[-1], 'datetime'):
-                        latest = self.md_obj.iloc[-2]  # 新K线已经生成，上一K线已固定，计入
-                        _time = tafunc.time_to_datetime(latest['datetime'])
-                        _time = datetime.strftime(_time, "%Y/%m/%d %H:%M:%S")
-                        # print(f'=> {_time}\n{latest}\n')
-                        output = f"{_time},{latest['open']},{latest['high']},{latest['low']}," \
-                                 f"{latest['close']},{latest['volume']},{latest['open_oi']}," \
-                                 f"{latest['close_oi']}\n"
-                        # print(output)
-                        self.md_fp.write(output)
-        except asyncio.CancelledError:
-            self.logger.info(f"Flush '{self.symbol}' market data to disk.")
-            self.md_fp.close()
-

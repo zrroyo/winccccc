@@ -1,7 +1,7 @@
 # -*- coding:utf-8 -*-
 
 import traceback
-from .base import Strategy, MarketDataSaver
+from .base import Strategy
 from ..error import StrategyError
 from ..data import TradeDataComposition as TDC, Position as POS
 
@@ -25,9 +25,6 @@ class STR_WaveFlexSP(Strategy):
         # 申明交易跟踪变量
         self._listener = self.api.get_kline_serial(self.symbol, 60, data_length=20)
         self._quote = self.api.get_quote(symbol)
-        # 使能保存行情数据
-        md_saver = MarketDataSaver(api, "%s.csv" % self.symbol, self._listener, self.symbol, logger)
-        self.enable_save_market_data(md_saver)
 
     def load_tsk_parameters(self):
         """解析交易参数"""

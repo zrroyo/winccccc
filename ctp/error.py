@@ -19,3 +19,8 @@ class StrategyError(Exception):
 class TradeDetailsRecordError(Exception):
     """TDR异常"""
     pass
+
+
+class CtpSrvMDError(Exception):
+    """CtpSrvMD异常"""
+    pass
