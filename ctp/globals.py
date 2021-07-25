@@ -4,9 +4,10 @@ import os
 from lib import GenConfig
 
 # 定义全局变量
-CTP_CONFIG_DIR = os.path.join(os.environ.get('HOME'), '.winctp')
+# CTP_CONFIG_DIR = os.path.join(os.environ.get('HOME'), '.winctp')
+CTP_CONFIG_DIR = "/etc/winctp"
 GLOBAL_CONFIG = os.path.join(CTP_CONFIG_DIR, 'global')
-TASKS_CONFIG = os.path.join(CTP_CONFIG_DIR, 'tasks')
+TASKS_CONFIG = os.path.join(CTP_CONFIG_DIR, 'trd_tasks')
 
 
 class GlobalConfig(GenConfig):
