@@ -4,6 +4,7 @@ bin_dir=`dirname $0`
 bin_dir=`cd $bin_dir && pwd`
 echo "Current install dir: $bin_dir"
 
+# Create configure directory.
 config_dir="/etc/winctp"
 if [ -e $config_dir ]; then
     read -p "Found an existing installation, this is going to cover it, do you approve? Y(y)/N(n): " ok
@@ -16,6 +17,12 @@ if [ -e $config_dir ]; then
 fi
 mkdir -p $config_dir
 [ ! -e $config_dir ] && echo "Make sure root privilege to create configure dir: $config_dir" && exit 1
+
+# Create log directory.
+log_dir=/var/log/winctp
+[ ! -e "$log_dir/md" ] && echo "Creating log dir for md..." && mkdir -p "$log_dir/md"
+[ ! -e "$log_dir/trd" ] && echo "Creating log dir for trd..." && mkdir -p "$log_dir/trd"
+[ ! -e $log_dir ] && echo "Failed to create log dir: $log_dir" && exit 1
 
 echo "Creating configuration files..."
 # Create credentials file.
@@ -86,6 +93,8 @@ cat << EOF > $CTP_MD_SRV
 # description: ctp_md_srv
 # processname: ctp_md_srv
 # config: $config_dir
+
+export WINCTP_LOG_DIR=$log_dir
 
 CFG_DIR="$config_dir"
 INSTALL_DIR=$bin_dir
