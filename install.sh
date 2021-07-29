@@ -110,10 +110,10 @@ fi
 
 RETVAL=0
 
-# If PROC_NAME is currently running then return 1, otherwise return 0 instead.
+# If PROC_NAME is currently running then return the pid, otherwise return 0 instead.
 _check_winctp_exist() {
-    IfExist=\`ps awx -o command | awk -F/ '{print \$NF}' | grep -x \$PROC_NAME\`
-    [ "\$IfExist" != "" ] && return 1
+    pid=\`ps awx | grep \$INSTALL_DIR/\$PROC_NAME | grep -v grep | awk '{print \$1}'\`
+    [ "\$pid" != "" ] && return \$((\$pid))
     return 0
 }
 
@@ -127,7 +127,8 @@ start() {
         echo "\$PROC_NAME is already running"
     else
         "\$INSTALL_DIR/\$PROC_NAME" &
-        echo OK
+        _check_winctp_exist
+        echo "pid \$?"
     fi
 }
 
@@ -138,13 +139,15 @@ stop() {
     while [ 1 ]
     do
         _check_winctp_exist
-        if [ "\$?" != "0" ]
+        pid=\$?
+        if [ "\$pid" != "0" ]
         then
+            echo -n "pid \$pid, killing..."
             if [ "\$retry" -lt 9 ]
             then
-                killall -9 \$PROC_NAME > /dev/null 2>&1
+                kill -9 \$pid > /dev/null 2>&1
             else
-                killall -9 \$PROC_NAME
+                kill -9 \$pid
                 break
             fi
             sleep 1
@@ -153,6 +156,7 @@ stop() {
             break
         fi
     done
+    echo ""
 }
 
 # See how we were called.
