@@ -24,8 +24,8 @@ log_dir=/var/log/winctp
 [ ! -e "$log_dir/trd" ] && echo "Creating log dir for trd..." && mkdir -p "$log_dir/trd"
 [ ! -e $log_dir ] && echo "Failed to create log dir: $log_dir" && exit 1
 
-echo "Creating configuration files..."
 # Create credentials file.
+echo -n "Creating 'credentials' files... "
 cat << EOF > $config_dir/credentials
 [shinnytech]
 account =
@@ -36,8 +36,11 @@ broker_id =
 account_id =
 password =
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Create global file.
+echo -n "Creating 'global' files... "
 cat << EOF > $config_dir/global
 [globals]
 md_runtime_dir =
@@ -49,8 +52,11 @@ market_data_dir =
 trade_time = 8:55~11:35, 20:55~2:35
 #replay_time = 19:00
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Create trader tasks file.
+echo -n "Creating 'trd_tasks' files... "
 cat << EOF > $config_dir/trd_tasks
 # Each future defines its own parameters as below, for example,
 #
@@ -64,8 +70,11 @@ cat << EOF > $config_dir/trd_tasks
 #clThresholds = [-0.016, -0.016, -0.025, -0.03]
 #
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Create market-data tasks file.
+echo -n "Creating 'md_tasks' files... "
 cat << EOF > $config_dir/md_tasks
 # Each future defines its own parameters as below, for example,
 #
@@ -76,15 +85,18 @@ cat << EOF > $config_dir/md_tasks
 #duration = 60
 #
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Generate ctp_md_srv init service.
 CTP_MD_SRV=/etc/init.d/ctp_md_srv
 if [ -e $CTP_MD_SRV ]; then
-    echo "Found an old installation for ctp_md_srv, remove and reinstall..."
-    update-rc.d -f ctp_md_srv remove
+    echo -n "Found an old installation for ctp_md_srv, remove and reinstall... "
+    systemctl disable ctp_md_srv
+    echo "[ OK ]"
 fi
 
-echo "Creating ctp_md_srv service..."
+echo -n "Creating ctp_md_srv service... "
 cat << EOF > $CTP_MD_SRV
 #! /bin/sh
 #
@@ -179,10 +191,20 @@ esac
 
 exit \$RETVAL
 EOF
-[ ! -e $CTP_MD_SRV ] && echo "Failed to create $CTP_MD_SRV, exit." && exit 1
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 chmod 754 $CTP_MD_SRV
 
 # Add into init services.
-update-rc.d ctp_md_srv defaults 95
+echo -n "Adding ctp_md_srv to init services... "
+if [ -e /etc/rc.local ]; then
+    srv_exist=`sed -n "/systemctl start ctp_md_srv/p" /etc/rc.local`
+    [ -z "$srv_exist" ] && sed -i "/^exit 0$/isystemctl start ctp_md_srv.service" /etc/rc.local
+    echo "[ OK ]"
+else
+    echo "[ FAIL ]"
+fi
+
 # Start the new service.
-service ctp_md_srv restart
+systemctl enable ctp_md_srv
+systemctl start ctp_md_srv.service
