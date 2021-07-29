@@ -7,9 +7,16 @@ echo "Current install dir: $bin_dir"
 # Create configure directory.
 config_dir="/etc/winctp"
 if [ -e $config_dir ]; then
-    read -p "Found an existing installation, this is going to cover it, do you approve? Y(y)/N(n): " ok
+    read -p "Found an existing installation, this is going to cover it, do you approve? Y(y)/N(n)/B(b): " ok
     if [ "$ok" = "N" -o "$ok" = "n" ]; then
         exit 1
+    elif [ "$ok" = "B" -o "$ok" = "b" ]; then
+        random=`head -200 /dev/urandom | cksum | awk '{print $1}'`
+        old_dir="$config_dir-$random"
+        echo -n "The old installation has been bakuped at: $old_dir... "
+        mv $config_dir $old_dir
+        [ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+        echo "[ OK ]"
     elif [ "$ok" != "Y" -a "$ok" != "y" ]; then
         echo "Got input '$ok', but only Y(y)/N(n) is allowed, exit."
         exit 1
