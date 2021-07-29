@@ -7,9 +7,16 @@ echo "Current install dir: $bin_dir"
 # Create configure directory.
 config_dir="/etc/winctp"
 if [ -e $config_dir ]; then
-    read -p "Found an existing installation, this is going to cover it, do you approve? Y(y)/N(n): " ok
+    read -p "Found an existing installation, this is going to cover it, do you approve? Y(y)/N(n)/B(b): " ok
     if [ "$ok" = "N" -o "$ok" = "n" ]; then
         exit 1
+    elif [ "$ok" = "B" -o "$ok" = "b" ]; then
+        random=`head -200 /dev/urandom | cksum | awk '{print $1}'`
+        old_dir="$config_dir-$random"
+        echo -n "The old installation has been bakuped at: $old_dir... "
+        mv $config_dir $old_dir
+        [ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+        echo "[ OK ]"
     elif [ "$ok" != "Y" -a "$ok" != "y" ]; then
         echo "Got input '$ok', but only Y(y)/N(n) is allowed, exit."
         exit 1
@@ -24,8 +31,8 @@ log_dir=/var/log/winctp
 [ ! -e "$log_dir/trd" ] && echo "Creating log dir for trd..." && mkdir -p "$log_dir/trd"
 [ ! -e $log_dir ] && echo "Failed to create log dir: $log_dir" && exit 1
 
-echo "Creating configuration files..."
 # Create credentials file.
+echo -n "Creating 'credentials' files... "
 cat << EOF > $config_dir/credentials
 [shinnytech]
 account =
@@ -36,8 +43,11 @@ broker_id =
 account_id =
 password =
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Create global file.
+echo -n "Creating 'global' files... "
 cat << EOF > $config_dir/global
 [globals]
 md_runtime_dir =
@@ -49,8 +59,11 @@ market_data_dir =
 trade_time = 8:55~11:35, 20:55~2:35
 #replay_time = 19:00
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Create trader tasks file.
+echo -n "Creating 'trd_tasks' files... "
 cat << EOF > $config_dir/trd_tasks
 # Each future defines its own parameters as below, for example,
 #
@@ -64,8 +77,11 @@ cat << EOF > $config_dir/trd_tasks
 #clThresholds = [-0.016, -0.016, -0.025, -0.03]
 #
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Create market-data tasks file.
+echo -n "Creating 'md_tasks' files... "
 cat << EOF > $config_dir/md_tasks
 # Each future defines its own parameters as below, for example,
 #
@@ -76,15 +92,18 @@ cat << EOF > $config_dir/md_tasks
 #duration = 60
 #
 EOF
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
 # Generate ctp_md_srv init service.
 CTP_MD_SRV=/etc/init.d/ctp_md_srv
 if [ -e $CTP_MD_SRV ]; then
-    echo "Found an old installation for ctp_md_srv, remove and reinstall..."
-    update-rc.d -f ctp_md_srv remove
+    echo -n "Found an old installation for ctp_md_srv, remove and reinstall... "
+    systemctl disable ctp_md_srv
+    echo "[ OK ]"
 fi
 
-echo "Creating ctp_md_srv service..."
+echo -n "Creating ctp_md_srv service... "
 cat << EOF > $CTP_MD_SRV
 #! /bin/sh
 #
@@ -110,10 +129,10 @@ fi
 
 RETVAL=0
 
-# If PROC_NAME is currently running then return 1, otherwise return 0 instead.
+# If PROC_NAME is currently running then return the pid, otherwise return 0 instead.
 _check_winctp_exist() {
-    IfExist=\`ps awx -o command | awk -F/ '{print \$NF}' | grep -x \$PROC_NAME\`
-    [ "\$IfExist" != "" ] && return 1
+    pid=\`ps awx | grep \$INSTALL_DIR/\$PROC_NAME | grep -v grep | awk '{print \$1}'\`
+    [ "\$pid" != "" ] && return \$((\$pid))
     return 0
 }
 
@@ -127,7 +146,8 @@ start() {
         echo "\$PROC_NAME is already running"
     else
         "\$INSTALL_DIR/\$PROC_NAME" &
-        echo OK
+        _check_winctp_exist
+        echo "pid \$?"
     fi
 }
 
@@ -138,13 +158,15 @@ stop() {
     while [ 1 ]
     do
         _check_winctp_exist
-        if [ "\$?" != "0" ]
+        pid=\$?
+        if [ "\$pid" != "0" ]
         then
+            echo -n "pid \$pid, killing..."
             if [ "\$retry" -lt 9 ]
             then
-                killall -9 \$PROC_NAME > /dev/null 2>&1
+                kill -9 \$pid > /dev/null 2>&1
             else
-                killall -9 \$PROC_NAME
+                kill -9 \$pid
                 break
             fi
             sleep 1
@@ -153,6 +175,7 @@ stop() {
             break
         fi
     done
+    echo ""
 }
 
 # See how we were called.
@@ -175,10 +198,20 @@ esac
 
 exit \$RETVAL
 EOF
-[ ! -e $CTP_MD_SRV ] && echo "Failed to create $CTP_MD_SRV, exit." && exit 1
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 chmod 754 $CTP_MD_SRV
 
 # Add into init services.
-update-rc.d ctp_md_srv defaults 95
+echo -n "Adding ctp_md_srv to init services... "
+if [ -e /etc/rc.local ]; then
+    srv_exist=`sed -n "/systemctl start ctp_md_srv/p" /etc/rc.local`
+    [ -z "$srv_exist" ] && sed -i "/^exit 0$/isystemctl start ctp_md_srv.service" /etc/rc.local
+    echo "[ OK ]"
+else
+    echo "[ FAIL ]"
+fi
+
 # Start the new service.
-service ctp_md_srv restart
+systemctl enable ctp_md_srv
+systemctl start ctp_md_srv.service
