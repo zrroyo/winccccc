@@ -113,6 +113,16 @@ cat << EOF > $CTP_MD_SRV
 # processname: ctp_md_srv
 # config: $config_dir
 
+### BEGIN INIT INFO
+# Provides:          ctp_md_srv
+# Required-Start:
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start ctp_md_srv daemon at boot time
+# Description:       Start ctp_md_srv daemon at boot time
+### END INIT INFO
+
 export WINCTP_LOG_DIR=$log_dir
 
 CFG_DIR="$config_dir"
@@ -164,9 +174,9 @@ stop() {
             echo -n "pid \$pid, killing..."
             if [ "\$retry" -lt 9 ]
             then
-                kill -9 \$pid > /dev/null 2>&1
+                kill -INT \$pid > /dev/null 2>&1
             else
-                kill -9 \$pid
+                kill -INT \$pid
                 break
             fi
             sleep 1
