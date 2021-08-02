@@ -18,6 +18,7 @@ class MarketDataSaver:
     def __init__(self, api, md_file, md_obj, symbol, logger):
         self.logger = logger
         self.api = api
+        self.md_file = md_file
         self.md_obj = md_obj
         self.symbol = symbol
         _global = GlobalConfig()
@@ -42,7 +43,7 @@ class MarketDataSaver:
                         # print(f"{self.symbol} => {output}")
                         self.md_fp.write(output)
         except asyncio.CancelledError:
-            self.logger.info(f"Flushing market data to disk for '{self.symbol}'.")
+            self.logger.info(f"Flushing market data to disk for '{os.path.basename(self.md_file)}'.")
             self.md_fp.close()
 
 
@@ -56,12 +57,16 @@ class CtpSrvMD(object):
             md_cfg = MdSrvConfig()
             all_symbols = md_cfg.get_md_symbols()
             for symbol in all_symbols:
-                duration = int(md_cfg.get_symbol_duration(symbol))
-                kline = self.api.get_kline_serial(symbol, duration)
-                dat_file = "%s.csv" % symbol
-                md_saver = MarketDataSaver(self.api, dat_file, kline, symbol, self.logger)
-                self.api.create_task(md_saver.save_market_data())
-        except Exception as e:
+                durations = md_cfg.get_symbol_duration(symbol)
+                durations = list(filter(lambda x: x, durations.split(',')))
+                self.logger.debug(f"durations for '{symbol}': {durations}")
+                for d in durations:
+                    duration = int(d)
+                    kline = self.api.get_kline_serial(symbol, duration)
+                    dat_file = f"{symbol}_{d}.csv"
+                    md_saver = MarketDataSaver(self.api, dat_file, kline, symbol, self.logger)
+                    self.api.create_task(md_saver.save_market_data())
+        except Exception:
             self.api.close()
             self.logger.error(f"CtpSrvMD初始化异常：{traceback.format_exc()}")
             raise CtpSrvMDError(f"CtpSrvMD初始化异常")
