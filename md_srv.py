@@ -15,7 +15,8 @@ LOG_LEVEL = logging.DEBUG
 def get_logger(level):
     """初始化日志接口"""
     log_file = "%s.log" % time.strftime("%Y%m%d%H%M%S", time.localtime())
-    log_dir = os.environ.get('WINCTP_LOG_DIR')
+    _global_cfg = ctp.GlobalConfig()
+    log_dir = _global_cfg.get_log_dir()
     if log_dir:
         log_file = os.path.join(log_dir, 'md', log_file)
     logger = logging.getLogger('ctp_srv')
@@ -33,7 +34,5 @@ try:
     srv = ctp.CtpSrvMD(logger)
     srv.run()
 except Exception:
-    logger.error(f"{traceback.format_exc()}")
+    logger.error(traceback.format_exc())
     print(traceback.format_exc())
-
-
