@@ -50,6 +50,7 @@ echo "[ OK ]"
 echo -n "Creating 'global' files... "
 cat << EOF > $config_dir/global
 [globals]
+log_dir = $log_dir
 md_runtime_dir =
 trade_details_dir =
 trader_config_dir =
@@ -95,133 +96,50 @@ EOF
 [ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
 echo "[ OK ]"
 
-# Generate ctp_md_srv init service.
-CTP_MD_SRV=/etc/init.d/ctp_md_srv
+# Generate ctp_md_srv system service.
+CTP_MD_SRV=/etc/systemd/system/ctp_md_srv.service
 if [ -e $CTP_MD_SRV ]; then
     echo -n "Found an old installation for ctp_md_srv, remove and reinstall... "
-    systemctl disable ctp_md_srv
+    systemctl disable ctp_md_srv.service
     echo "[ OK ]"
 fi
 
 echo -n "Creating ctp_md_srv service... "
 cat << EOF > $CTP_MD_SRV
-#! /bin/sh
-#
-# Startup script for ctp_md_srv
-#
-# description: ctp_md_srv
-# processname: ctp_md_srv
-# config: $config_dir
+[Unit]
+Description = ctp_md_srv (WinCTP service)
 
-### BEGIN INIT INFO
-# Provides:          ctp_md_srv
-# Required-Start:
-# Required-Stop:
-# Default-Start:     2 3 4 5
-# Default-Stop:      0 1 6
-# Short-Description: Start ctp_md_srv daemon at boot time
-# Description:       Start ctp_md_srv daemon at boot time
-### END INIT INFO
+[Service]
+Type=simple
+ExecStart = $bin_dir/md_srv.py
+ExecStop = /bin/kill -INT \$MAINPID
+TimeoutStopSec = 120
+WorkingDirectory = $log_dir
+Restart = always
 
-export WINCTP_LOG_DIR=$log_dir
-
-CFG_DIR="$config_dir"
-INSTALL_DIR=$bin_dir
-PROC_NAME="md_srv.py"
-
-if [ ! -d "\$CFG_DIR" ]; then
-    echo "CFG_DIR doesn't exist"
-    exit 1
-elif [ ! -d "\$INSTALL_DIR" ]; then
-    echo "INSTALL_DIR doesn't exist"
-    exit 1
-fi
-
-RETVAL=0
-
-# If PROC_NAME is currently running then return the pid, otherwise return 0 instead.
-_check_winctp_exist() {
-    pid=\`ps awx | grep \$INSTALL_DIR/\$PROC_NAME | grep -v grep | awk '{print \$1}'\`
-    [ "\$pid" != "" ] && return \$((\$pid))
-    return 0
-}
-
-# See how we were called.
-start() {
-    echo -n "Starting winctp: "
-
-    _check_winctp_exist
-    if [ "\$?" != "0" ]
-    then
-        echo "\$PROC_NAME is already running"
-    else
-        "\$INSTALL_DIR/\$PROC_NAME" &
-        _check_winctp_exist
-        echo "pid \$?"
-    fi
-}
-
-stop() {
-    echo -n "Stopping winctp: "
-
-    retry=0
-    while [ 1 ]
-    do
-        _check_winctp_exist
-        pid=\$?
-        if [ "\$pid" != "0" ]
-        then
-            echo -n "pid \$pid, killing..."
-            if [ "\$retry" -lt 9 ]
-            then
-                kill -INT \$pid > /dev/null 2>&1
-            else
-                kill -INT \$pid
-                break
-            fi
-            sleep 1
-            retry=\$((\$retry + 1))
-        else
-            break
-        fi
-    done
-    echo ""
-}
-
-# See how we were called.
-case "\$1" in
-    start)
-        start
-        ;;
-    stop)
-        stop
-        ;;
-    restart)
-        stop
-        sleep 5
-        start
-        ;;
-    *)
-        echo "Usage: winctp {start|stop|restart}"
-        exit 1
-esac
-
-exit \$RETVAL
+[Install]
+WantedBy = multi-user.target
 EOF
 [ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
 echo "[ OK ]"
-chmod 754 $CTP_MD_SRV
+chmod 644 $CTP_MD_SRV
 
 # Add into init services.
 echo -n "Adding ctp_md_srv to init services... "
-if [ -e /etc/rc.local ]; then
-    srv_exist=`sed -n "/systemctl start ctp_md_srv/p" /etc/rc.local`
-    [ -z "$srv_exist" ] && sed -i "/^exit 0$/isystemctl start ctp_md_srv.service" /etc/rc.local
-    echo "[ OK ]"
-else
-    echo "[ FAIL ]"
-fi
+systemctl enable ctp_md_srv.service
+[ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
+echo "[ OK ]"
 
-# Start the new service.
-systemctl enable ctp_md_srv
-systemctl start ctp_md_srv.service
+cat << EOF
+
+    WinCTP (ctp_md_srv service) has been installed successfully!
+    Please fill the configurations at $config_dir before start the service,
+    then start the service as below,
+
+        sudo systemctl start ctp_md_srv.service
+
+     Or stop the service,
+
+        sudo systemctl stop ctp_md_srv.service
+
+EOF
