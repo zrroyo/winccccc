@@ -3,6 +3,7 @@
 import os
 import asyncio
 import traceback
+import signal
 from datetime import datetime
 from tqsdk import TqApi, tafunc
 from lib.genconfig import GenConfig
@@ -51,6 +52,9 @@ class CtpSrvMD(object):
     """CTP Server for Storing Market data."""
     def __init__(self, logger):
         self.logger = logger
+        self._recv_sig_stop = False    # Signal to stop and exit service.
+        signal.signal(signal.SIGTERM, self._sig_term_handler)
+
         auth = ApiAuth()
         self.api = TqApi(auth.get_account(), auth=auth.get_auth())
         try:
@@ -74,6 +78,8 @@ class CtpSrvMD(object):
     def run(self):
         try:
             while 1:
+                if self._recv_sig_stop:
+                    raise KeyboardInterrupt
                 self.api.wait_update()
         except KeyboardInterrupt:
             self.logger.info(f"服务被 Ctrl+C 中断！")
@@ -82,6 +88,10 @@ class CtpSrvMD(object):
             raise CtpSrvMDError(f"捕获到未知异常")
         finally:
             self.api.close()
+
+    def _sig_term_handler(self, sig, frame):
+        self.logger.info(f"收到服务退出信号: {sig}")
+        self._recv_sig_stop = True
 
 
 class MdSrvConfig(GenConfig):

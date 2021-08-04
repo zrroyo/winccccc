@@ -17,6 +17,9 @@ class GlobalConfig(GenConfig):
         self.cfgFile = cfgFile
         self.defaultSec = 'globals'
 
+    def get_log_dir(self):
+        return self.getSecOption(self.defaultSec, 'log_dir')
+
     def get_md_runtime_dir(self):
         return self.getSecOption(self.defaultSec, 'md_runtime_dir')
 
