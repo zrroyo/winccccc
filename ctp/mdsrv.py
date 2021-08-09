@@ -65,6 +65,7 @@ class CtpSrvMD(object):
                 durations = list(filter(lambda x: x, durations.split(',')))
                 self.logger.debug(f"durations for '{symbol}': {durations}")
                 for d in durations:
+                    d = d.strip()
                     duration = int(d)
                     kline = self.api.get_kline_serial(symbol, duration)
                     dat_file = f"{symbol}_{d}.csv"
