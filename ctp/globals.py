@@ -15,20 +15,24 @@ class GlobalConfig(GenConfig):
     def __init__(self, cfgFile=GLOBAL_CONFIG):
         super(GlobalConfig, self).__init__(cfgFile)
         self.cfgFile = cfgFile
-        self.defaultSec = 'globals'
 
     def get_log_dir(self):
-        return self.getSecOption(self.defaultSec, 'log_dir')
+        return self.getSecOption('globals', 'log_dir')
 
     def get_md_runtime_dir(self):
-        return self.getSecOption(self.defaultSec, 'md_runtime_dir')
+        return self.getSecOption('globals', 'md_runtime_dir')
 
     def get_trade_details_dir(self):
-        return self.getSecOption(self.defaultSec, 'trade_details_dir')
+        return self.getSecOption('globals', 'trade_details_dir')
 
     def get_trader_config_dir(self):
-        return self.getSecOption(self.defaultSec, 'trader_config_dir')
+        return self.getSecOption('globals', 'trader_config_dir')
 
     def get_market_data_dir(self):
-        return self.getSecOption(self.defaultSec, 'market_data_dir')
+        return self.getSecOption('globals', 'market_data_dir')
 
+    def get_mdsrv_start_time(self):
+        return self.getSecOption('mdsrv', 'start_time')
+
+    def get_mdsrv_stop_time(self):
+        return self.getSecOption('mdsrv', 'stop_time')
