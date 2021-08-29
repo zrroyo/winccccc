@@ -59,6 +59,10 @@ market_data_dir =
 [daemon]
 trade_time = 8:55~11:35, 20:55~2:35
 #replay_time = 19:00
+
+[mdsrv]
+start_time = 20:30
+stop_time = 15:30
 EOF
 [ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
 echo "[ OK ]"
