@@ -96,13 +96,13 @@ class CtpSrvMD(object):
                     if self.api is None:
                         self.logger.info(f"启动服务时间到")
                         self._start_srv()
-                    self.api.wait_update()
+                    self.api.wait_update(deadline=time.time()+60)  # 设置deadline避免非交易时段被无限阻塞
                 else:  # 非交易时段
                     if self.api is None:
                         time.sleep(1)
                         continue
                     self.logger.info(f"停止服务时间到")
-                    self.api.wait_update()
+                    self.api.wait_update(deadline=time.time()+60)
                     self.api.close()
                     self.api = None
         except KeyboardInterrupt:
