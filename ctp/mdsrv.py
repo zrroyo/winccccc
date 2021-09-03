@@ -5,6 +5,7 @@ import asyncio
 import traceback
 import signal
 import time
+import pandas as pd
 from datetime import datetime
 from tqsdk import TqApi, tafunc
 from lib.genconfig import GenConfig
@@ -24,8 +25,8 @@ class MarketDataSaver:
         self.md_obj = md_obj
         self.symbol = symbol
         _global = GlobalConfig()
-        filename = os.path.join(_global.get_market_data_dir(), md_file)
-        self.md_fp = open(filename, 'a+')
+        self.filename = os.path.join(_global.get_market_data_dir(), md_file)
+        self.md_fp = open(self.filename, 'a+')
 
     def __del__(self):
         self.md_fp.close()
@@ -33,20 +34,46 @@ class MarketDataSaver:
     async def save_market_data(self):
         """保存行情数据"""
         try:
+            synced = False
             async with self.api.register_update_notify(self.md_obj) as update_chan:
+                try:
+                    # 对齐本地数据至最新
+                    if not synced:
+                        dat = pd.read_csv(self.filename, header=None)
+                        latest = dat.iloc[-1][0]
+                        first = self.md_obj[self.md_obj['datetime'] ==
+                                    tafunc.time_to_ns_timestamp(datetime.strptime(latest, "%Y/%m/%d %H:%M:%S"))].index
+                        if len(first) == 0:
+                            first = 0
+                        else:
+                            first = first[0] + 1
+                        to_save = self.md_obj.iloc[first:-1]
+                        self.logger.info(f"将同步数据到本地：{os.path.basename(self.filename)}，local latest {latest}")
+                        for _, row in to_save.iterrows():
+                            self._store_data(row)
+                        synced = True
+                except pd.errors.EmptyDataError:
+                    self.logger.warn(f"将同步数据到本地：{os.path.basename(self.filename)}，本地无数据！")
+
                 async for _ in update_chan:
                     if self.api.is_changing(self.md_obj.iloc[-1], 'datetime'):
                         latest = self.md_obj.iloc[-2]  # 新K线已经生成，上一K线已固定，计入
-                        _time = tafunc.time_to_datetime(latest['datetime'])
-                        _time = datetime.strftime(_time, "%Y/%m/%d %H:%M:%S")
-                        output = f"{_time},{latest['open']},{latest['high']},{latest['low']}," \
-                                 f"{latest['close']},{latest['volume']},{latest['open_oi']}," \
-                                 f"{latest['close_oi']}\n"
-                        # print(f"{self.symbol} => {output}")
-                        self.md_fp.write(output)
+                        self._store_data(latest)
         except asyncio.CancelledError:
             self.logger.info(f"Flushing market data to disk for '{os.path.basename(self.md_file)}'.")
             self.md_fp.close()
+
+    def _store_data(self, latest):
+        """将数据写入文件"""
+        if latest['datetime'] == 0:  # 如请求K线数大于服务器端有效数据，则多于将用空数据补齐，需过滤掉
+            return
+        _time = tafunc.time_to_datetime(latest['datetime'])
+        _time = datetime.strftime(_time, "%Y/%m/%d %H:%M:%S")
+        output = f"{_time},{latest['open']},{latest['high']},{latest['low']}," \
+                 f"{latest['close']},{latest['volume']},{latest['open_oi']}," \
+                 f"{latest['close_oi']}\n"
+        # print(f"{self.symbol} => {output}")
+        self.md_fp.write(output)
 
 
 class CtpSrvMD(object):
@@ -79,7 +106,7 @@ class CtpSrvMD(object):
                 for d in durations:
                     d = d.strip()
                     duration = int(d)
-                    kline = self.api.get_kline_serial(symbol, duration)
+                    kline = self.api.get_kline_serial(symbol, duration, data_length=600)
                     dat_file = f"{symbol}_{d}.csv"
                     md_saver = MarketDataSaver(self.api, dat_file, kline, symbol, self.logger)
                     self.api.create_task(md_saver.save_market_data())
