@@ -60,7 +60,7 @@ class MarketDataSaver:
                         latest = self.md_obj.iloc[-2]  # 新K线已经生成，上一K线已固定，计入
                         self._store_data(latest)
         except asyncio.CancelledError:
-            self.logger.info(f"Flushing market data to disk for '{os.path.basename(self.md_file)}'.")
+            self.logger.debug(f"Flushing market data to disk for '{os.path.basename(self.md_file)}'.")
             self.md_fp.close()
 
     def _store_data(self, latest):

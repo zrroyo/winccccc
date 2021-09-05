@@ -36,3 +36,7 @@ class GlobalConfig(GenConfig):
 
     def get_mdsrv_stop_time(self):
         return self.getSecOption('mdsrv', 'stop_time')
+
+    def get_mdsrv_debug_level(self):
+        level = self.getSecOption('mdsrv', 'debug_level')
+        return int(level)

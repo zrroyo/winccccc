@@ -63,6 +63,8 @@ trade_time = 8:55~11:35, 20:55~2:35
 [mdsrv]
 start_time = 20:30
 stop_time = 15:30
+# Debug level: 10 -> debug，20 -> info, 30 -> warning, 40 -> error, 50 -> critical/fatal
+debug_level = 20
 EOF
 [ $? -ne 0 ]  &&  echo "[ FAIL ]" && exit 1
 echo "[ OK ]"
