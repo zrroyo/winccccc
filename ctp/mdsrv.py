@@ -34,26 +34,32 @@ class MarketDataSaver:
     async def save_market_data(self):
         """保存行情数据"""
         try:
-            synced = False
             async with self.api.register_update_notify(self.md_obj) as update_chan:
+                # 对齐本地数据至最新
                 try:
-                    # 对齐本地数据至最新
-                    if not synced:
-                        dat = pd.read_csv(self.filename, header=None)
-                        latest = dat.iloc[-1][0]
-                        first = self.md_obj[self.md_obj['datetime'] ==
-                                    tafunc.time_to_ns_timestamp(datetime.strptime(latest, "%Y/%m/%d %H:%M:%S"))].index
-                        if len(first) == 0:
-                            first = 0
-                        else:
-                            first = first[0] + 1
+                    first = latest = None
+                    dat = pd.read_csv(self.filename, header=None)
+                    latest = dat.iloc[-1][0]
+                    diff = self.md_obj[self.md_obj['datetime'] >
+                               tafunc.time_to_ns_timestamp(datetime.strptime(latest, "%Y/%m/%d %H:%M:%S"))].index
+                    if len(diff) == 1:
+                        self.logger.info(f"本地数据已最新，{os.path.basename(self.filename)}, local latest {latest}")
+                    elif len(diff) == 0:
+                        self.logger.error(f"本地数据异常：{os.path.basename(self.filename)}, local latest {latest}, "
+                                          f"md latest {tafunc.time_to_datetime(self.md_obj.iloc[-1]['datetime'])}")
+                    else:
+                        first = diff[0]
+                except pd.errors.EmptyDataError:  # 本地无数据
+                    first = 0
+                    self.logger.warn(f"将同步数据到本地：{os.path.basename(self.filename)}，本地无数据, "
+                                     f"md oldest {tafunc.time_to_datetime(self.md_obj.iloc[first]['datetime'])}")
+                finally:
+                    if first is not None:
                         to_save = self.md_obj.iloc[first:-1]
-                        self.logger.info(f"将同步数据到本地：{os.path.basename(self.filename)}，local latest {latest}")
+                        self.logger.info(f"将同步数据到本地：{os.path.basename(self.filename)}，local latest {latest}, "
+                                         f"md next {tafunc.time_to_datetime(self.md_obj.iloc[first]['datetime'])}")
                         for _, row in to_save.iterrows():
                             self._store_data(row)
-                        synced = True
-                except pd.errors.EmptyDataError:
-                    self.logger.warn(f"将同步数据到本地：{os.path.basename(self.filename)}，本地无数据！")
 
                 async for _ in update_chan:
                     if self.api.is_changing(self.md_obj.iloc[-1], 'datetime'):

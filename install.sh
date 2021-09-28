@@ -122,7 +122,7 @@ ExecStop = /bin/kill -INT \$MAINPID
 TimeoutStopSec = 120
 WorkingDirectory = $log_dir
 Restart = always
-RestartSec = 300
+RestartSec = 600
 
 [Install]
 WantedBy = multi-user.target
