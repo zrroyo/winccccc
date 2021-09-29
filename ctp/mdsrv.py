@@ -43,26 +43,27 @@ class MarketDataSaver:
                     diff = self.md_obj[self.md_obj['datetime'] >
                                tafunc.time_to_ns_timestamp(datetime.strptime(latest, "%Y/%m/%d %H:%M:%S"))].index
                     if len(diff) == 1:
-                        self.logger.info(f"本地数据已最新，{os.path.basename(self.filename)}, local latest {latest}")
+                        self.logger.info(f"本地数据已最新，{self.md_file}, local latest {latest}")
                     elif len(diff) == 0:
-                        self.logger.error(f"本地数据异常：{os.path.basename(self.filename)}, local latest {latest}, "
+                        self.logger.error(f"本地数据异常：{self.md_file}, local latest {latest}, "
                                           f"md latest {tafunc.time_to_datetime(self.md_obj.iloc[-1]['datetime'])}")
                     else:
                         first = diff[0]
                 except pd.errors.EmptyDataError:  # 本地无数据
                     first = 0
-                    self.logger.warn(f"将同步数据到本地：{os.path.basename(self.filename)}，本地无数据, "
+                    self.logger.warn(f"将同步数据到本地：{self.md_file}，本地无数据, "
                                      f"md oldest {tafunc.time_to_datetime(self.md_obj.iloc[first]['datetime'])}")
                 finally:
                     if first is not None:
                         to_save = self.md_obj.iloc[first:-1]
-                        self.logger.info(f"将同步数据到本地：{os.path.basename(self.filename)}，local latest {latest}, "
+                        self.logger.info(f"将同步数据到本地：{self.md_file}，local latest {latest}, "
                                          f"md next {tafunc.time_to_datetime(self.md_obj.iloc[first]['datetime'])}")
                         for _, row in to_save.iterrows():
                             self._store_data(row)
 
                 async for _ in update_chan:
                     if self.api.is_changing(self.md_obj.iloc[-1], 'datetime'):
+
                         latest = self.md_obj.iloc[-2]  # 新K线已经生成，上一K线已固定，计入
                         self._store_data(latest)
         except asyncio.CancelledError:
