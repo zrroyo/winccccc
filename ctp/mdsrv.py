@@ -7,7 +7,7 @@ import signal
 import time
 import pandas as pd
 from datetime import datetime
-from tqsdk import TqApi, tafunc
+from tqsdk import TqApi, tafunc, exceptions as tq_exceptions
 from lib.genconfig import GenConfig
 from .globals import GlobalConfig, CTP_CONFIG_DIR
 from .error import CtpSrvMDError
@@ -129,7 +129,12 @@ class CtpSrvMD(object):
                 elif self._srv_status == 1:   # 交易时段
                     if self.api is None:
                         self.logger.info(f"启动服务时间到")
-                        self._start_srv()
+                        try:
+                            self._start_srv()
+                        except tq_exceptions.TqTimeoutError:  # 数据超时，可能处于假期时段
+                            self.logger.error(f"TqTimeoutError超时异常：10分钟后重试...")
+                            time.sleep(600)
+                            continue
                     self.api.wait_update(deadline=time.time()+60)  # 设置deadline避免非交易时段被无限阻塞
                 else:  # 非交易时段
                     if self.api is None:
